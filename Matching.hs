@@ -2,6 +2,9 @@
 
 module Matching where
 
+import Control.Arrow ((&&&))
+import Data.Array
+import Data.Function (fix)
 import Control.Monad (msum)
 import Data.Bifunctor (second)
 import Data.List
@@ -111,3 +114,54 @@ dfac :: Int -> Integer
 dfac n
   | n <= 0 = 1
   | otherwise = fromIntegral n * dfac (n-2)
+
+expected :: Int -> Rational
+expected p = sum $ zipWith (*) (map (% dfac (2*p - 1)) ns) (map fromIntegral [p .. 2*p - 1])
+  where
+    Just ns = distributionNumerators p
+
+-- Lazy version of multiplication that short-circuits if the first argument is 0;
+-- needed to avoid making some recursive calls in cases where the probability is 0
+infixl 7 .*
+0 .* _ = 0
+x .* y = x * y
+
+-- p t m k = probability of taking exactly t additional turns when there are m pairs left and we know k cards
+p :: Integer -> Integer -> Integer -> Rational
+p 0 0 _ = 1
+p t _ _ | t <= 0 = 0
+p t 1 _ = if t == 1 then 1 else 0
+p t m k
+  = k % (2*m - k) .* p (t-1) (m-1) (k-1)
+  + (1 - k % (2*m - k)) .*
+      ( (k % (2*m - k - 1)) .* p (t-2) (m-1) k
+      + (1 % (2*m - k - 1)) .* p (t-1) (m-1) k
+      + (1 - (k+1) % (2*m - k - 1)) .* p (t-1) m (k+2)
+      )
+
+q :: (Integer,Integer,Integer) -> Rational
+q = memoFix ((-1,0,0), (200,100,100)) q'
+  where
+    q' _ (0,0,_) = 1
+    q' _ (t,_,_) | t <= 0 = 0
+    q' _ (t,1,_) = if t == 1 then 1 else 0
+    q' r (t,m,k)
+      = k % (2*m - k) .* r (t-1,m-1,k-1)
+      + (1 - k % (2*m - k)) .*
+        ( (k % (2*m - k - 1)) .* r (t-2,m-1,k)
+          + (1 % (2*m - k - 1)) .* r (t-1,m-1,k)
+          + (1 - (k+1) % (2*m - k - 1)) .* r (t-1,m,k+2)
+        )
+
+
+toTable :: Ix i => (i, i) -> (i -> a) -> Array i a
+toTable rng f = array rng (map (id &&& f) (range rng))
+
+fromTable :: Ix i => Array i a -> (i -> a)
+fromTable = (!)
+
+memo :: Ix i => (i, i) -> (i -> a) -> (i -> a)
+memo rng = fromTable . toTable rng
+
+memoFix :: Ix i => (i, i) -> ((i -> a) -> (i -> a)) -> (i -> a)
+memoFix rng f = fix (memo rng . f)
